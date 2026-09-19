@@ -5,7 +5,7 @@ import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-
+import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   runApp(const FinSightApp());
 }
@@ -47,6 +47,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool isSignIn = true;
   bool obscurePassword = true;
   bool isLoading = false;
+  bool savePassword = false;
 
   final TextEditingController nameController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
@@ -54,6 +55,31 @@ class _AuthScreenState extends State<AuthScreen> {
   final TextEditingController passwordController = TextEditingController();
 
   final String baseUrl = 'http://localhost:5000/api/auth';
+
+  @override
+  void initState() {
+    super.initState();
+    loadSavedLogin();
+  }
+
+  Future<void> loadSavedLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString('saved_email');
+    final savedPassword = prefs.getString('saved_password');
+
+    if (!mounted) return;
+
+    if (savedEmail != null && savedEmail.isNotEmpty) {
+      emailController.text = savedEmail;
+    }
+
+    if (savedPassword != null && savedPassword.isNotEmpty) {
+      passwordController.text = savedPassword;
+      setState(() {
+        savePassword = true;
+      });
+    }
+  }
 
   void clearFields() {
     nameController.clear();
@@ -103,7 +129,10 @@ class _AuthScreenState extends State<AuthScreen> {
           data['message']?.toString() ?? 'Registration successful!',
         );
         clearFields();
-        setState(() => isSignIn = true);
+        setState(() {
+          isSignIn = true;
+          savePassword = false;
+        });
       } else {
         showMessage(
           data['message']?.toString() ?? 'Registration failed',
@@ -151,6 +180,22 @@ class _AuthScreenState extends State<AuthScreen> {
 
         if (user is Map<String, dynamic>) {
           userName = user['name']?.toString() ?? 'User';
+        }
+
+        final prefs = await SharedPreferences.getInstance();
+
+        if (savePassword) {
+          await prefs.setString(
+            'saved_email',
+            emailController.text.trim(),
+          );
+          await prefs.setString(
+            'saved_password',
+            passwordController.text,
+          );
+        } else {
+          await prefs.remove('saved_email');
+          await prefs.remove('saved_password');
         }
 
         if (!mounted) return;
@@ -278,7 +323,10 @@ class _AuthScreenState extends State<AuthScreen> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () {
-                          setState(() => isSignIn = false);
+                          setState(() {
+                            isSignIn = false;
+                            savePassword = false;
+                          });
                           clearFields();
                         },
                         child: const Text('Sign Up'),
@@ -338,7 +386,25 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 25),
+                if (isSignIn)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Checkbox(
+                          value: savePassword,
+                          onChanged: (value) {
+                            setState(() {
+                              savePassword = value ?? false;
+                            });
+                          },
+                        ),
+                        const Text('Save password'),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -361,7 +427,10 @@ class _AuthScreenState extends State<AuthScreen> {
                 const SizedBox(height: 10),
                 TextButton(
                   onPressed: () {
-                    setState(() => isSignIn = !isSignIn);
+                    setState(() {
+                      isSignIn = !isSignIn;
+                      if (!isSignIn) savePassword = false;
+                    });
                     clearFields();
                   },
                   child: Text(
