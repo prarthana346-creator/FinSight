@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -517,11 +517,11 @@ class FinancialData {
   final double amount;
   final String notes;
 
-  // Used only when type == Financial Goal.
-  // amount is kept as the target amount for backward compatibility.
+  // Financial Goal fields.
   final double currentSavings;
   final String targetDate;
   final double monthlyContribution;
+  final String status;
 
   FinancialData({
     required this.portfolioCategory,
@@ -532,16 +532,28 @@ class FinancialData {
     this.currentSavings = 0.0,
     this.targetDate = '',
     this.monthlyContribution = 0.0,
+    this.status = 'To Do',
   });
 
-  bool get isFinancialGoal => type.trim().toLowerCase() == 'financial goal';
+  bool get isFinancialGoal =>
+      type.trim().toLowerCase() == 'financial goal';
 
   double get goalProgress {
     if (!isFinancialGoal || amount <= 0) return 0.0;
+
     final progress = currentSavings / amount;
+
     if (progress < 0) return 0.0;
     if (progress > 1) return 1.0;
+
     return progress;
+  }
+
+  double get goalPercentage => goalProgress * 100;
+
+  double get remainingAmount {
+    final remaining = amount - currentSavings;
+    return remaining < 0 ? 0.0 : remaining;
   }
 }
 
@@ -699,6 +711,7 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
                 targetDate: item['targetDate']?.toString() ?? '',
                 monthlyContribution:
                     _toDouble(item['monthlyContribution']),
+                status: item['status']?.toString() ?? 'To Do',
               ),
             );
           }
@@ -845,6 +858,7 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
           'currentSavings': item.currentSavings,
           'targetDate': item.targetDate,
           'monthlyContribution': item.monthlyContribution,
+          'status': item.status,
         }).toList(),
         'goldRecords': goldRecords.map((item) => {
           'date': item.date.toIso8601String(),
@@ -1462,6 +1476,491 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
       ),
     );
   }
+  // ============================================================
+// GOAL TRACKER
+// ============================================================
+
+Widget goalTrackerCard() {
+  final goals = financialGoals;
+
+  final int totalGoals = goals.length;
+
+  final int toDoCount = goals
+      .where((goal) => goal.status == 'To Do')
+      .length;
+
+  final int inProgressCount = goals
+      .where((goal) => goal.status == 'In Progress')
+      .length;
+
+  final int workDoneCount = goals
+      .where((goal) => goal.status == 'Work Done')
+      .length;
+
+  final double totalTarget = goals.fold(
+    0.0,
+    (sum, goal) => sum + goal.amount,
+  );
+
+  final double totalSaved = goals.fold(
+    0.0,
+    (sum, goal) => sum + goal.currentSavings,
+  );
+
+  final double totalRemaining =
+      (totalTarget - totalSaved) < 0
+          ? 0.0
+          : totalTarget - totalSaved;
+
+  final double overallProgress =
+      totalTarget > 0
+          ? (totalSaved / totalTarget).clamp(0.0, 1.0)
+          : 0.0;
+
+  return Card(
+    elevation: 3,
+    margin: const EdgeInsets.only(bottom: 16),
+    child: Padding(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          // ====================================================
+          // TITLE
+          // ====================================================
+
+          Row(
+            children: [
+              const Icon(
+                Icons.track_changes,
+                size: 28,
+              ),
+
+              const SizedBox(width: 10),
+
+              const Text(
+                'Goal Tracker',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 18),
+
+          // ====================================================
+          // STATUS SUMMARY
+          // ====================================================
+
+          Row(
+            children: [
+
+              Expanded(
+                child: goalTrackerStat(
+                  title: 'Total Goals',
+                  value: '$totalGoals',
+                  icon: Icons.flag,
+                ),
+              ),
+
+              const SizedBox(width: 8),
+
+              Expanded(
+                child: goalTrackerStat(
+                  title: 'To Do',
+                  value: '$toDoCount',
+                  icon: Icons.assignment_outlined,
+                ),
+              ),
+
+              const SizedBox(width: 8),
+
+              Expanded(
+                child: goalTrackerStat(
+                  title: 'In Progress',
+                  value: '$inProgressCount',
+                  icon: Icons.timelapse,
+                ),
+              ),
+
+              const SizedBox(width: 8),
+
+              Expanded(
+                child: goalTrackerStat(
+                  title: 'Work Done',
+                  value: '$workDoneCount',
+                  icon: Icons.check_circle,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // ====================================================
+          // OVERALL PROGRESS
+          // ====================================================
+
+          const Text(
+            'Overall Progress',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          LinearProgressIndicator(
+            value: overallProgress,
+            minHeight: 12,
+          ),
+
+          const SizedBox(height: 8),
+
+          Text(
+            '${(overallProgress * 100).toStringAsFixed(1)}% completed',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 18),
+
+          const Divider(),
+
+          const SizedBox(height: 10),
+
+          // ====================================================
+          // MONEY SUMMARY
+          // ====================================================
+
+          goalTrackerMoneyRow(
+            'Total Target',
+            totalTarget,
+          ),
+
+          goalTrackerMoneyRow(
+            'Total Saved',
+            totalSaved,
+          ),
+
+          goalTrackerMoneyRow(
+            'Remaining',
+            totalRemaining,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+
+// ============================================================
+// GOAL TRACKER STAT BOX
+// ============================================================
+
+Widget goalTrackerStat({
+  required String title,
+  required String value,
+  required IconData icon,
+}) {
+  return Container(
+    padding: const EdgeInsets.symmetric(
+      vertical: 12,
+      horizontal: 4,
+    ),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(
+        color: Theme.of(context)
+            .colorScheme
+            .outlineVariant,
+      ),
+    ),
+    child: Column(
+      children: [
+
+        Icon(
+          icon,
+          size: 24,
+        ),
+
+        const SizedBox(height: 6),
+
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 4),
+
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 11,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+
+// ============================================================
+// GOAL TRACKER MONEY ROW
+// ============================================================
+
+Widget goalTrackerMoneyRow(
+  String title,
+  double amount,
+) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(
+      vertical: 6,
+    ),
+    child: Row(
+      children: [
+
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+            ),
+          ),
+        ),
+
+        Text(
+          '₹${amount.toStringAsFixed(2)}',
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+  // ============================================================
+  // FINANCIAL GOAL ACTIONS
+  // ============================================================
+
+  Future<void> openFinancialGoalDialog({
+    FinancialData? existing,
+  }) async {
+    final FinancialData? result =
+        await showDialog<FinancialData>(
+      context: context,
+      builder: (_) => FinancialGoalDialog(
+        existing: existing,
+      ),
+    );
+
+    if (result == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      if (existing != null) {
+        final index = investments.indexOf(existing);
+        if (index >= 0) {
+          investments[index] = result;
+        }
+      } else {
+        investments.add(result);
+      }
+    });
+
+    await savePortfolio();
+
+    if (!mounted) return;
+
+    showMessage(
+      existing == null
+          ? 'Financial goal saved!'
+          : 'Financial goal updated!',
+    );
+  }
+
+  Future<void> deleteFinancialGoal(
+    FinancialData goal,
+  ) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Financial Goal'),
+          content: Text(
+            'Are you sure you want to delete "${goal.name}"?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      investments.remove(goal);
+    });
+
+    await savePortfolio();
+
+    if (!mounted) return;
+
+    showMessage('Financial goal deleted.');
+  }
+
+  Widget financialGoalTile(FinancialData goal) {
+    DateTime? parsedDate;
+
+    if (goal.targetDate.trim().isNotEmpty) {
+      parsedDate = DateTime.tryParse(goal.targetDate);
+    }
+
+    String formattedDate = 'Not selected';
+
+    if (parsedDate != null) {
+      formattedDate =
+          '${parsedDate.day.toString().padLeft(2, '0')}/'
+          '${parsedDate.month.toString().padLeft(2, '0')}/'
+          '${parsedDate.year}';
+    }
+
+    IconData statusIcon;
+
+    switch (goal.status) {
+      case 'Work Done':
+        statusIcon = Icons.check_circle;
+        break;
+      case 'In Progress':
+        statusIcon = Icons.timelapse;
+        break;
+      case 'To Do':
+      default:
+        statusIcon = Icons.assignment_outlined;
+        break;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const CircleAvatar(
+                  child: Icon(Icons.flag),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        goal.name,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Chip(
+                        avatar: Icon(
+                          statusIcon,
+                          size: 18,
+                        ),
+                        label: Text(goal.status),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Edit',
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: () => openFinancialGoalDialog(
+                    existing: goal,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Delete',
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.red,
+                  ),
+                  onPressed: () => deleteFinancialGoal(goal),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Target Amount: ₹${goal.amount.toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Current Savings: '
+              '₹${goal.currentSavings.toStringAsFixed(2)}',
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Remaining: '
+              '₹${goal.remainingAmount.toStringAsFixed(2)}',
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Monthly Contribution: '
+              '₹${goal.monthlyContribution.toStringAsFixed(2)}',
+            ),
+            const SizedBox(height: 6),
+            Text('Target Date: $formattedDate'),
+            const SizedBox(height: 14),
+            LinearProgressIndicator(
+              value: goal.goalProgress,
+              minHeight: 10,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${goal.goalPercentage.toStringAsFixed(1)}% completed',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            if (goal.notes.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Notes',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(goal.notes),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
   // ============================================================
   // FUTURE GOALS / NOTEPAD
@@ -1954,15 +2453,32 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
 
             const SizedBox(height: 18),
 
-            // GOALS
+            // FINANCIAL GOALS
             financialSection(
               title: 'Financial Goals',
               icon: Icons.flag,
               count: financialGoals.length,
-              child: recordsList(
-                financialGoals,
-                Icons.flag,
-                'No Financial Goals added yet.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => openFinancialGoalDialog(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Financial Goal'),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (financialGoals.isNotEmpty)
+                    goalTrackerCard(),
+                  if (financialGoals.isEmpty)
+                    emptyMessage(
+                      'No Financial Goals added yet.',
+                    )
+                  else
+                    ...financialGoals.map(financialGoalTile),
+                ],
               ),
             ),
 
@@ -2488,6 +3004,348 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
     return '${date.day.toString().padLeft(2, '0')}/'
         '${date.month.toString().padLeft(2, '0')}/'
         '${date.year}';
+  }
+}
+
+// ============================================================
+// FINANCIAL GOAL DIALOG
+// ============================================================
+
+class FinancialGoalDialog extends StatefulWidget {
+  final FinancialData? existing;
+
+  const FinancialGoalDialog({
+    super.key,
+    this.existing,
+  });
+
+  @override
+  State<FinancialGoalDialog> createState() =>
+      _FinancialGoalDialogState();
+}
+
+class _FinancialGoalDialogState
+    extends State<FinancialGoalDialog> {
+  late final TextEditingController nameController;
+  late final TextEditingController targetAmountController;
+  late final TextEditingController currentSavingsController;
+  late final TextEditingController monthlyContributionController;
+  late final TextEditingController notesController;
+
+  DateTime? selectedTargetDate;
+  String selectedStatus = 'To Do';
+
+  @override
+  void initState() {
+    super.initState();
+
+    nameController = TextEditingController(
+      text: widget.existing?.name ?? '',
+    );
+
+    targetAmountController = TextEditingController(
+      text: widget.existing != null
+          ? widget.existing!.amount.toString()
+          : '',
+    );
+
+    currentSavingsController = TextEditingController(
+      text: widget.existing != null
+          ? widget.existing!.currentSavings.toString()
+          : '',
+    );
+
+    monthlyContributionController = TextEditingController(
+      text: widget.existing != null
+          ? widget.existing!.monthlyContribution.toString()
+          : '',
+    );
+
+    notesController = TextEditingController(
+      text: widget.existing?.notes ?? '',
+    );
+
+    if (widget.existing != null &&
+        widget.existing!.targetDate.trim().isNotEmpty) {
+      selectedTargetDate = DateTime.tryParse(
+        widget.existing!.targetDate,
+      );
+    }
+
+    selectedStatus = widget.existing?.status ?? 'To Do';
+
+    const allowedStatuses = [
+      'To Do',
+      'In Progress',
+      'Work Done',
+    ];
+
+    if (!allowedStatuses.contains(selectedStatus)) {
+      selectedStatus = 'To Do';
+    }
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    targetAmountController.dispose();
+    currentSavingsController.dispose();
+    monthlyContributionController.dispose();
+    notesController.dispose();
+    super.dispose();
+  }
+
+  Future<void> selectTargetDate() async {
+    final now = DateTime.now();
+    final firstDate = DateTime(now.year, now.month, now.day);
+    var initialDate = selectedTargetDate ?? firstDate;
+
+    if (initialDate.isBefore(firstDate)) {
+      initialDate = firstDate;
+    }
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: firstDate,
+      lastDate: DateTime(now.year + 50),
+    );
+
+    if (picked != null && mounted) {
+      setState(() {
+        selectedTargetDate = picked;
+      });
+    }
+  }
+
+  String formatDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/'
+        '${date.year}';
+  }
+
+  void showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  void saveGoal() {
+    final name = nameController.text.trim();
+
+    final targetAmount = double.tryParse(
+      targetAmountController.text.trim(),
+    );
+
+    final currentSavings = double.tryParse(
+      currentSavingsController.text.trim(),
+    );
+
+    final monthlyContribution = double.tryParse(
+      monthlyContributionController.text.trim(),
+    );
+
+    final notes = notesController.text.trim();
+
+    if (name.isEmpty) {
+      showError('Please enter a goal name.');
+      return;
+    }
+
+    if (targetAmount == null || targetAmount <= 0) {
+      showError('Please enter a valid target amount.');
+      return;
+    }
+
+    if (currentSavings == null || currentSavings < 0) {
+      showError('Current savings cannot be negative.');
+      return;
+    }
+
+    if (currentSavings > targetAmount) {
+      showError(
+        'Current savings cannot be greater than target amount.',
+      );
+      return;
+    }
+
+    if (monthlyContribution == null || monthlyContribution < 0) {
+      showError('Monthly contribution cannot be negative.');
+      return;
+    }
+
+    if (selectedTargetDate == null) {
+      showError('Please select a target date.');
+      return;
+    }
+
+    Navigator.pop(
+      context,
+      FinancialData(
+        portfolioCategory:
+            widget.existing?.portfolioCategory ?? 'General',
+        type: 'Financial Goal',
+        name: name,
+        amount: targetAmount,
+        notes: notes,
+        currentSavings: currentSavings,
+        targetDate: selectedTargetDate!.toIso8601String(),
+        monthlyContribution: monthlyContribution,
+        status: selectedStatus,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEditing = widget.existing != null;
+
+    return AlertDialog(
+      title: Text(
+        isEditing
+            ? 'Edit Financial Goal'
+            : 'Add Financial Goal',
+      ),
+      content: SizedBox(
+        width: 500,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Goal Name',
+                  hintText: 'Example: Buy a Car',
+                  prefixIcon: Icon(Icons.flag),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              TextField(
+                controller: targetAmountController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Target Amount',
+                  prefixIcon: Icon(Icons.currency_rupee),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              TextField(
+                controller: currentSavingsController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Current Savings',
+                  prefixIcon: Icon(Icons.savings),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              TextField(
+                controller: monthlyContributionController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Monthly Contribution',
+                  prefixIcon: Icon(Icons.calendar_month),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              InkWell(
+                onTap: selectTargetDate,
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Target Date',
+                    prefixIcon: Icon(Icons.date_range),
+                    border: OutlineInputBorder(),
+                  ),
+                  child: Text(
+                    selectedTargetDate == null
+                        ? 'Select target date'
+                        : formatDate(selectedTargetDate!),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              DropdownButtonFormField<String>(
+                initialValue: selectedStatus,
+                decoration: const InputDecoration(
+                  labelText: 'Goal Status',
+                  prefixIcon: Icon(Icons.flag_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'To Do',
+                    child: Text('📝 To Do'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'In Progress',
+                    child: Text('🔄 In Progress'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'Work Done',
+                    child: Text('✅ Work Done'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      selectedStatus = value;
+                    });
+                  }
+                },
+              ),
+
+              const SizedBox(height: 14),
+
+              TextField(
+                controller: notesController,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Notes',
+                  hintText: 'Add any additional details...',
+                  prefixIcon: Icon(Icons.notes),
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: saveGoal,
+          icon: const Icon(Icons.save),
+          label: Text(isEditing ? 'Update' : 'Save'),
+        ),
+      ],
+    );
   }
 }
 

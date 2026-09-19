@@ -2,12 +2,6 @@ const mongoose = require('mongoose');
 
 // ============================================================
 // FINANCIAL DATA
-// Used for:
-// Mutual Fund
-// SIP
-// PF
-// Financial Goal
-// Other Investment
 // ============================================================
 
 const FinancialDataSchema = new mongoose.Schema(
@@ -27,26 +21,23 @@ const FinancialDataSchema = new mongoose.Schema(
       default: '',
     },
 
-    // For normal investments:
-    // amount = invested amount
-    //
-    // For Financial Goal:
-    // amount = target amount
+    // For normal investments this is the investment amount.
+    // For Financial Goal this stores the target amount.
     amount: {
       type: Number,
       default: 0,
     },
 
-    // ========================================================
-    // FINANCIAL GOAL FIELDS
-    // ========================================================
-
-    currentSavings: {
-      type: Number,
-      default: 0,
+    notes: {
+      type: String,
+      default: '',
     },
 
-    monthlyContribution: {
+    // ==========================================================
+    // FINANCIAL GOAL FIELDS
+    // ==========================================================
+
+    currentSavings: {
       type: Number,
       default: 0,
     },
@@ -56,9 +47,19 @@ const FinancialDataSchema = new mongoose.Schema(
       default: '',
     },
 
-    notes: {
+    monthlyContribution: {
+      type: Number,
+      default: 0,
+    },
+
+    status: {
       type: String,
-      default: '',
+      enum: [
+        'Work Done',
+        'In Progress',
+        'To Do',
+      ],
+      default: 'To Do',
     },
   },
   {
@@ -66,8 +67,9 @@ const FinancialDataSchema = new mongoose.Schema(
   }
 );
 
+
 // ============================================================
-// GOLD
+// GOLD RECORD
 // ============================================================
 
 const GoldRecordSchema = new mongoose.Schema(
@@ -97,8 +99,9 @@ const GoldRecordSchema = new mongoose.Schema(
   }
 );
 
+
 // ============================================================
-// FD / RD
+// FD / RD DEPOSIT RECORD
 // ============================================================
 
 const DepositRecordSchema = new mongoose.Schema(
@@ -153,8 +156,9 @@ const DepositRecordSchema = new mongoose.Schema(
   }
 );
 
+
 // ============================================================
-// LIFE INSURANCE
+// LIFE INSURANCE RECORD
 // ============================================================
 
 const InsuranceRecordSchema = new mongoose.Schema(
@@ -204,6 +208,7 @@ const InsuranceRecordSchema = new mongoose.Schema(
   }
 );
 
+
 // ============================================================
 // FUTURE GOALS / NOTEPAD
 // ============================================================
@@ -230,9 +235,9 @@ const FutureGoalNoteSchema = new mongoose.Schema(
   }
 );
 
+
 // ============================================================
 // PORTFOLIO
-// One portfolio document per user
 // ============================================================
 
 const PortfolioSchema = new mongoose.Schema(
@@ -245,19 +250,19 @@ const PortfolioSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Mutual Fund / SIP / PF / Financial Goal / Other
+    // Mutual Funds, SIP, PF, Financial Goals, Other
     investments: {
       type: [FinancialDataSchema],
       default: [],
     },
 
-    // Gold holdings
+    // Gold records
     goldRecords: {
       type: [GoldRecordSchema],
       default: [],
     },
 
-    // FD and RD
+    // FD and RD records
     deposits: {
       type: [DepositRecordSchema],
       default: [],
@@ -275,10 +280,16 @@ const PortfolioSchema = new mongoose.Schema(
       default: [],
     },
   },
+
   {
     timestamps: true,
   }
 );
+
+
+// ============================================================
+// EXPORT MODEL
+// ============================================================
 
 module.exports = mongoose.model(
   'Portfolio',
