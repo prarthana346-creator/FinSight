@@ -14,13 +14,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Authentication Routes
-app.use("/api/auth", authRoutes);
+// Test route
+app.get("/", (req, res) => {
+  res.send("FinSight Backend is Running!");
+});
 
-// Portfolio Routes
+// Routes
+app.use("/api/auth", authRoutes);
 app.use("/api/portfolio", portfolioRoutes);
 
-// MongoDB Connection
+// MongoDB
 mongoose
   .connect("mongodb://127.0.0.1:27017/FinSightDB")
   .then(() => {
@@ -30,14 +33,10 @@ mongoose
     console.log("MongoDB Connection Error:", error.message);
   });
 
-// Test Route
-app.get("/", (req, res) => {
-  res.send("FinSight Backend is Running!");
-});
-
-// Start Server
+// Server
 const PORT = 5000;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log("Portfolio routes loaded at /api/portfolio");
 });

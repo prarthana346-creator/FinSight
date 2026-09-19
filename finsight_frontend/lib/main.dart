@@ -56,31 +56,6 @@ class _AuthScreenState extends State<AuthScreen> {
 
   final String baseUrl = 'http://localhost:5000/api/auth';
 
-  @override
-  void initState() {
-    super.initState();
-    loadSavedLogin();
-  }
-
-  Future<void> loadSavedLogin() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedEmail = prefs.getString('saved_email');
-    final savedPassword = prefs.getString('saved_password');
-
-    if (!mounted) return;
-
-    if (savedEmail != null && savedEmail.isNotEmpty) {
-      emailController.text = savedEmail;
-    }
-
-    if (savedPassword != null && savedPassword.isNotEmpty) {
-      passwordController.text = savedPassword;
-      setState(() {
-        savePassword = true;
-      });
-    }
-  }
-
   void clearFields() {
     nameController.clear();
     emailController.clear();
@@ -96,6 +71,26 @@ class _AuthScreenState extends State<AuthScreen> {
         backgroundColor: isError ? Colors.red : Colors.green,
       ),
     );
+  }
+
+  Future<void> loadSavedLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final savedEmail = prefs.getString('saved_email');
+    final savedPassword = prefs.getString('saved_password');
+
+    if (!mounted) return;
+
+    if (savedEmail != null && savedEmail.isNotEmpty) {
+      emailController.text = savedEmail;
+    }
+
+    if (savedPassword != null && savedPassword.isNotEmpty) {
+      passwordController.text = savedPassword;
+      setState(() {
+        savePassword = true;
+      });
+    }
   }
 
   Future<void> registerUser() async {
@@ -129,10 +124,7 @@ class _AuthScreenState extends State<AuthScreen> {
           data['message']?.toString() ?? 'Registration successful!',
         );
         clearFields();
-        setState(() {
-          isSignIn = true;
-          savePassword = false;
-        });
+        setState(() => isSignIn = true);
       } else {
         showMessage(
           data['message']?.toString() ?? 'Registration failed',
@@ -177,9 +169,21 @@ class _AuthScreenState extends State<AuthScreen> {
       if (response.statusCode == 200) {
         final user = data['user'];
         String userName = 'User';
+        String userId = '';
 
         if (user is Map<String, dynamic>) {
           userName = user['name']?.toString() ?? 'User';
+          userId = user['_id']?.toString() ??
+              user['id']?.toString() ??
+              '';
+        }
+
+        if (userId.isEmpty) {
+          showMessage(
+            'User ID was not returned by the server.',
+            isError: true,
+          );
+          return;
         }
 
         final prefs = await SharedPreferences.getInstance();
@@ -205,6 +209,7 @@ class _AuthScreenState extends State<AuthScreen> {
           MaterialPageRoute(
             builder: (context) => FinSightDashboard(
               userName: userName,
+              userId: userId,
             ),
           ),
         );
@@ -240,6 +245,12 @@ class _AuthScreenState extends State<AuthScreen> {
         borderRadius: BorderRadius.circular(12),
       ),
     );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    loadSavedLogin();
   }
 
   @override
@@ -323,10 +334,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () {
-                          setState(() {
-                            isSignIn = false;
-                            savePassword = false;
-                          });
+                          setState(() => isSignIn = false);
                           clearFields();
                         },
                         child: const Text('Sign Up'),
@@ -387,24 +395,20 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                 ),
                 if (isSignIn)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Checkbox(
-                          value: savePassword,
-                          onChanged: (value) {
-                            setState(() {
-                              savePassword = value ?? false;
-                            });
-                          },
-                        ),
-                        const Text('Save password'),
-                      ],
-                    ),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: savePassword,
+                        onChanged: (value) {
+                          setState(() {
+                            savePassword = value ?? false;
+                          });
+                        },
+                      ),
+                      const Text('Save password'),
+                    ],
                   ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -427,10 +431,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 const SizedBox(height: 10),
                 TextButton(
                   onPressed: () {
-                    setState(() {
-                      isSignIn = !isSignIn;
-                      if (!isSignIn) savePassword = false;
-                    });
+                    setState(() => isSignIn = !isSignIn);
                     clearFields();
                   },
                   child: Text(
@@ -549,10 +550,12 @@ class FutureGoalNote {
 
 class FinSightDashboard extends StatefulWidget {
   final String userName;
+  final String userId;
 
   const FinSightDashboard({
     super.key,
     required this.userName,
+    required this.userId,
   });
 
   @override
@@ -565,6 +568,343 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
   final List<DepositRecord> deposits = [];
   final List<InsuranceRecord> insurancePolicies = [];
   final List<FutureGoalNote> futureGoalNotes = [];
+
+  bool isPortfolioLoading = true;
+  bool isPortfolioSaving = false;
+
+  final String portfolioBaseUrl =
+      'http://localhost:5000/api/portfolio';
+
+  @override
+  void initState() {
+    super.initState();
+    loadPortfolio();
+  }
+
+  Future<void> loadPortfolio() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$portfolioBaseUrl/${widget.userId}'),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to load portfolio');
+      }
+
+      final Map<String, dynamic> data =
+          jsonDecode(response.body) as Map<String, dynamic>;
+
+      final portfolio = data['portfolio'];
+
+      if (portfolio is! Map<String, dynamic>) {
+        if (mounted) {
+          setState(() => isPortfolioLoading = false);
+        }
+        return;
+      }
+
+      final List<FinancialData> loadedInvestments = [];
+      final investmentData = portfolio['investments'];
+
+      if (investmentData is List) {
+        for (final item in investmentData) {
+          if (item is Map<String, dynamic>) {
+            loadedInvestments.add(
+              FinancialData(
+                portfolioCategory:
+                    item['portfolioCategory']?.toString() ?? 'General',
+                type: item['type']?.toString() ?? 'Other',
+                name: item['name']?.toString() ?? '',
+                amount: _toDouble(item['amount']),
+              ),
+            );
+          }
+        }
+      }
+
+      final List<GoldRecord> loadedGold = [];
+      final goldData = portfolio['goldRecords'];
+
+      if (goldData is List) {
+        for (final item in goldData) {
+          if (item is Map<String, dynamic>) {
+            loadedGold.add(
+              GoldRecord(
+                date: DateTime.tryParse(
+                      item['date']?.toString() ?? '',
+                    ) ??
+                    DateTime.now(),
+                pricePerGram: _toDouble(item['pricePerGram']),
+                grams: _toDouble(item['grams']),
+                amountInvested: _toDouble(item['amountInvested']),
+              ),
+            );
+          }
+        }
+      }
+
+      final List<DepositRecord> loadedDeposits = [];
+      final depositData = portfolio['deposits'];
+
+      if (depositData is List) {
+        for (final item in depositData) {
+          if (item is Map<String, dynamic>) {
+            loadedDeposits.add(
+              DepositRecord(
+                type: item['type']?.toString() ?? '',
+                bank: item['bank']?.toString() ?? '',
+                accountNumber:
+                    item['accountNumber']?.toString() ?? '',
+                principal: _toDouble(item['principal']),
+                monthlyDeposit: _toDouble(item['monthlyDeposit']),
+                interestRate: _toDouble(item['interestRate']),
+                startDate: item['startDate']?.toString() ?? '',
+                maturityDate: item['maturityDate']?.toString() ?? '',
+                maturityAmount: _toDouble(item['maturityAmount']),
+              ),
+            );
+          }
+        }
+      }
+
+      final List<InsuranceRecord> loadedInsurance = [];
+      final insuranceData = portfolio['insurancePolicies'];
+
+      if (insuranceData is List) {
+        for (final item in insuranceData) {
+          if (item is Map<String, dynamic>) {
+            loadedInsurance.add(
+              InsuranceRecord(
+                company: item['company']?.toString() ?? '',
+                policyNumber: item['policyNumber']?.toString() ?? '',
+                policyType: item['policyType']?.toString() ?? '',
+                premium: _toDouble(item['premium']),
+                frequency: item['frequency']?.toString() ?? '',
+                startDate: item['startDate']?.toString() ?? '',
+                maturityDate: item['maturityDate']?.toString() ?? '',
+                sumAssured: _toDouble(item['sumAssured']),
+              ),
+            );
+          }
+        }
+      }
+
+      final List<FutureGoalNote> loadedNotes = [];
+      final notesData = portfolio['futureGoalNotes'];
+
+      if (notesData is List) {
+        for (final item in notesData) {
+          if (item is Map<String, dynamic>) {
+            loadedNotes.add(
+              FutureGoalNote(
+                title: item['title']?.toString() ?? '',
+                note: item['note']?.toString() ?? '',
+                createdAt: DateTime.tryParse(
+                      item['createdAt']?.toString() ?? '',
+                    ) ??
+                    DateTime.now(),
+              ),
+            );
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        investments
+          ..clear()
+          ..addAll(loadedInvestments);
+        goldRecords
+          ..clear()
+          ..addAll(loadedGold);
+        deposits
+          ..clear()
+          ..addAll(loadedDeposits);
+        insurancePolicies
+          ..clear()
+          ..addAll(loadedInsurance);
+        futureGoalNotes
+          ..clear()
+          ..addAll(loadedNotes);
+        isPortfolioLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() => isPortfolioLoading = false);
+      showMessage(
+        'Could not load saved portfolio: $error',
+        isError: true,
+      );
+    }
+  }
+
+  double _toDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0.0;
+  }
+
+  Future<void> savePortfolio() async {
+    if (isPortfolioSaving) return;
+
+    // The user ID is required because the backend stores one portfolio
+    // separately for every registered account.
+    final userId = widget.userId.trim();
+
+    if (userId.isEmpty) {
+      showMessage(
+        'Cannot save: user ID is missing. Please logout and login again.',
+        isError: true,
+      );
+      return;
+    }
+
+    setState(() => isPortfolioSaving = true);
+
+    try {
+      final body = {
+        'investments': investments.map((item) {
+          return {
+            'portfolioCategory': item.portfolioCategory,
+            'type': item.type,
+            'name': item.name,
+            'amount': item.amount,
+          };
+        }).toList(),
+
+        'goldRecords': goldRecords.map((item) {
+          return {
+            'date': item.date.toIso8601String(),
+            'pricePerGram': item.pricePerGram,
+            'grams': item.grams,
+            'amountInvested': item.amountInvested,
+          };
+        }).toList(),
+
+        'deposits': deposits.map((item) {
+          return {
+            'type': item.type,
+            'bank': item.bank,
+            'accountNumber': item.accountNumber,
+            'principal': item.principal,
+            'monthlyDeposit': item.monthlyDeposit,
+            'interestRate': item.interestRate,
+            'startDate': item.startDate,
+            'maturityDate': item.maturityDate,
+            'maturityAmount': item.maturityAmount,
+          };
+        }).toList(),
+
+        'insurancePolicies': insurancePolicies.map((item) {
+          return {
+            'company': item.company,
+            'policyNumber': item.policyNumber,
+            'policyType': item.policyType,
+            'premium': item.premium,
+            'frequency': item.frequency,
+            'startDate': item.startDate,
+            'maturityDate': item.maturityDate,
+            'sumAssured': item.sumAssured,
+          };
+        }).toList(),
+
+        'futureGoalNotes': futureGoalNotes.map((item) {
+          return {
+            'title': item.title,
+            'note': item.note,
+            'createdAt': item.createdAt.toIso8601String(),
+          };
+        }).toList(),
+      };
+
+      final url = '$portfolioBaseUrl/$userId';
+
+      debugPrint('========== FINSIGHT SAVE ==========');
+      debugPrint('User ID: $userId');
+      debugPrint('PUT URL: $url');
+      debugPrint('Investments: ${investments.length}');
+      debugPrint('Gold: ${goldRecords.length}');
+      debugPrint('Deposits: ${deposits.length}');
+      debugPrint('Insurance: ${insurancePolicies.length}');
+      debugPrint('Future notes: ${futureGoalNotes.length}');
+
+      final response = await http
+          .put(
+            Uri.parse(url),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      debugPrint('SAVE STATUS: ${response.statusCode}');
+      debugPrint('SAVE RESPONSE: ${response.body}');
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        showMessage('Portfolio saved permanently!');
+      } else {
+        String serverMessage = 'Failed to save portfolio.';
+
+        try {
+          final decoded = jsonDecode(response.body);
+
+          if (decoded is Map<String, dynamic>) {
+            serverMessage =
+                decoded['message']?.toString() ??
+                decoded['error']?.toString() ??
+                serverMessage;
+          }
+        } catch (_) {
+          if (response.body.trim().isNotEmpty) {
+            serverMessage = response.body;
+          }
+        }
+
+        showMessage(
+          'Save failed (${response.statusCode}): $serverMessage',
+          isError: true,
+        );
+      }
+    } on http.ClientException catch (error) {
+      debugPrint('HTTP SAVE ERROR: $error');
+
+      if (!mounted) return;
+
+      showMessage(
+        'Cannot connect to FinSight backend. Make sure Node.js server is running on port 5000.',
+        isError: true,
+      );
+    } on FormatException catch (error) {
+      debugPrint('JSON SAVE ERROR: $error');
+
+      if (!mounted) return;
+
+      showMessage(
+        'Invalid response received from the backend.',
+        isError: true,
+      );
+    } catch (error, stackTrace) {
+      debugPrint('SAVE PORTFOLIO ERROR: $error');
+      debugPrint('$stackTrace');
+
+      if (!mounted) return;
+
+      showMessage(
+        'Could not save portfolio: $error',
+        isError: true,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => isPortfolioSaving = false);
+      }
+    }
+  }
 
   // ---------------- TOTALS ----------------
 
@@ -1215,6 +1555,17 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Save Permanently',
+            icon: isPortfolioSaving
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save),
+            onPressed: isPortfolioSaving ? null : savePortfolio,
+          ),
+          IconButton(
             tooltip: 'Logout',
             icon: const Icon(Icons.logout),
             onPressed: logout,
@@ -1240,9 +1591,13 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+      body: isPortfolioLoading
+          ? const Center(
+              child: CircularProgressIndicator(),
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(

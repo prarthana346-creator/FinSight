@@ -1,64 +1,64 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const Portfolio = require('../models/Portfolio');
+const express = require("express");
+const mongoose = require("mongoose");
+const Portfolio = require("../models/Portfolio");
 
 const router = express.Router();
 
-/*
-  GET USER PORTFOLIO
-  GET /api/portfolio/:userId
-*/
-router.get('/:userId', async (req, res) => {
+console.log("Portfolio router loaded successfully");
+
+// GET PORTFOLIO
+router.get("/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
+    console.log("GET PORTFOLIO:", userId);
+
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
-        message: 'Invalid user ID',
+        success: false,
+        message: "Invalid user ID",
       });
     }
 
-    let portfolio = await Portfolio.findOne({ userId });
+    const portfolio = await Portfolio.findOne({ userId });
 
-    // If user has never saved a portfolio before,
-    // return an empty portfolio.
-    if (!portfolio) {
-      portfolio = {
+    return res.status(200).json({
+      success: true,
+      portfolio: portfolio || {
         userId,
         investments: [],
         goldRecords: [],
         deposits: [],
         insurancePolicies: [],
         futureGoalNotes: [],
-      };
-    }
-
-    res.status(200).json({
-      success: true,
-      portfolio,
+      },
     });
   } catch (error) {
-    console.error('GET PORTFOLIO ERROR:', error);
+    console.error("GET PORTFOLIO ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: 'Failed to load portfolio',
+      message: "Failed to load portfolio",
+      error: error.message,
     });
   }
 });
 
 
-/*
-  SAVE ENTIRE PORTFOLIO
-  PUT /api/portfolio/:userId
-*/
-router.put('/:userId', async (req, res) => {
+// PUT / SAVE PORTFOLIO
+router.put("/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
+    console.log("=================================");
+    console.log("SAVE PORTFOLIO REQUEST");
+    console.log("USER ID:", userId);
+    console.log("=================================");
+
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
-        message: 'Invalid user ID',
+        success: false,
+        message: "Invalid user ID",
       });
     }
 
@@ -70,19 +70,24 @@ router.put('/:userId', async (req, res) => {
       futureGoalNotes = [],
     } = req.body;
 
-    const portfolio = await Portfolio.findOneAndUpdate(
-      { userId },
+    console.log("Investments:", investments.length);
+    console.log("Gold:", goldRecords.length);
+    console.log("Deposits:", deposits.length);
+    console.log("Insurance:", insurancePolicies.length);
+    console.log("Future Notes:", futureGoalNotes.length);
 
+    const portfolio = await Portfolio.findOneAndUpdate(
+      { userId: userId },
       {
         $set: {
-          investments,
-          goldRecords,
-          deposits,
-          insurancePolicies,
-          futureGoalNotes,
+          userId: userId,
+          investments: investments,
+          goldRecords: goldRecords,
+          deposits: deposits,
+          insurancePolicies: insurancePolicies,
+          futureGoalNotes: futureGoalNotes,
         },
       },
-
       {
         new: true,
         upsert: true,
@@ -90,49 +95,51 @@ router.put('/:userId', async (req, res) => {
       }
     );
 
-    res.status(200).json({
-      success: true,
-      message: 'Portfolio saved permanently',
-      portfolio,
-    });
-  } catch (error) {
-    console.error('SAVE PORTFOLIO ERROR:', error);
+    console.log("PORTFOLIO SAVED SUCCESSFULLY!");
 
-    res.status(500).json({
+    return res.status(200).json({
+      success: true,
+      message: "Portfolio saved permanently",
+      portfolio: portfolio,
+    });
+
+  } catch (error) {
+    console.error("SAVE PORTFOLIO ERROR:", error);
+
+    return res.status(500).json({
       success: false,
-      message: 'Failed to save portfolio',
+      message: "Failed to save portfolio",
       error: error.message,
     });
   }
 });
 
 
-/*
-  DELETE ENTIRE PORTFOLIO
-  Optional endpoint.
-*/
-router.delete('/:userId', async (req, res) => {
+// DELETE PORTFOLIO
+router.delete("/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
-        message: 'Invalid user ID',
+        success: false,
+        message: "Invalid user ID",
       });
     }
 
     await Portfolio.findOneAndDelete({ userId });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: 'Portfolio deleted',
+      message: "Portfolio deleted",
     });
-  } catch (error) {
-    console.error('DELETE PORTFOLIO ERROR:', error);
 
-    res.status(500).json({
+  } catch (error) {
+    console.error("DELETE PORTFOLIO ERROR:", error);
+
+    return res.status(500).json({
       success: false,
-      message: 'Failed to delete portfolio',
+      message: "Failed to delete portfolio",
     });
   }
 });
