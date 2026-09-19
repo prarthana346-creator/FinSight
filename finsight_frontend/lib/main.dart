@@ -27,7 +27,60 @@ class FinSightApp extends StatelessWidget {
         colorSchemeSeed: Colors.blue,
         scaffoldBackgroundColor: const Color(0xFFF5F7FA),
       ),
-      home: const AuthScreen(),
+      home: const SessionGate(),
+    );
+  }
+}
+
+// ============================================================
+// SESSION GATE
+// ============================================================
+
+class SessionGate extends StatefulWidget {
+  const SessionGate({super.key});
+
+  @override
+  State<SessionGate> createState() => _SessionGateState();
+}
+
+class _SessionGateState extends State<SessionGate> {
+  @override
+  void initState() {
+    super.initState();
+    _checkSavedSession();
+  }
+
+  Future<void> _checkSavedSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('logged_in_user_id') ?? '';
+    final userName = prefs.getString('logged_in_user_name') ?? 'User';
+
+    if (!mounted) return;
+
+    if (userId.isNotEmpty) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FinSightDashboard(
+            userName: userName,
+            userId: userId,
+          ),
+        ),
+      );
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const AuthScreen()),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
     );
   }
 }
@@ -187,6 +240,10 @@ class _AuthScreenState extends State<AuthScreen> {
         }
 
         final prefs = await SharedPreferences.getInstance();
+
+        // Keep the user logged in after an app/browser refresh.
+        await prefs.setString('logged_in_user_id', userId);
+        await prefs.setString('logged_in_user_name', userName);
 
         if (savePassword) {
           await prefs.setString(
@@ -458,13 +515,34 @@ class FinancialData {
   final String type;
   final String name;
   final double amount;
+  final String notes;
+
+  // Used only when type == Financial Goal.
+  // amount is kept as the target amount for backward compatibility.
+  final double currentSavings;
+  final String targetDate;
+  final double monthlyContribution;
 
   FinancialData({
     required this.portfolioCategory,
     required this.type,
     required this.name,
     required this.amount,
+    this.notes = '',
+    this.currentSavings = 0.0,
+    this.targetDate = '',
+    this.monthlyContribution = 0.0,
   });
+
+  bool get isFinancialGoal => type.trim().toLowerCase() == 'financial goal';
+
+  double get goalProgress {
+    if (!isFinancialGoal || amount <= 0) return 0.0;
+    final progress = currentSavings / amount;
+    if (progress < 0) return 0.0;
+    if (progress > 1) return 1.0;
+    return progress;
+  }
 }
 
 class GoldRecord {
@@ -616,6 +694,11 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
                 type: item['type']?.toString() ?? 'Other',
                 name: item['name']?.toString() ?? '',
                 amount: _toDouble(item['amount']),
+                notes: item['notes']?.toString() ?? '',
+                currentSavings: _toDouble(item['currentSavings']),
+                targetDate: item['targetDate']?.toString() ?? '',
+                monthlyContribution:
+                    _toDouble(item['monthlyContribution']),
               ),
             );
           }
@@ -749,170 +832,90 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
   Future<void> savePortfolio() async {
     if (isPortfolioSaving) return;
 
-    // The user ID is required because the backend stores one portfolio
-    // separately for every registered account.
-    final userId = widget.userId.trim();
-
-    if (userId.isEmpty) {
-      showMessage(
-        'Cannot save: user ID is missing. Please logout and login again.',
-        isError: true,
-      );
-      return;
-    }
-
     setState(() => isPortfolioSaving = true);
 
     try {
       final body = {
-        'investments': investments.map((item) {
-          return {
-            'portfolioCategory': item.portfolioCategory,
-            'type': item.type,
-            'name': item.name,
-            'amount': item.amount,
-          };
+        'investments': investments.map((item) => {
+          'portfolioCategory': item.portfolioCategory,
+          'type': item.type,
+          'name': item.name,
+          'amount': item.amount,
+          'notes': item.notes,
+          'currentSavings': item.currentSavings,
+          'targetDate': item.targetDate,
+          'monthlyContribution': item.monthlyContribution,
         }).toList(),
-
-        'goldRecords': goldRecords.map((item) {
-          return {
-            'date': item.date.toIso8601String(),
-            'pricePerGram': item.pricePerGram,
-            'grams': item.grams,
-            'amountInvested': item.amountInvested,
-          };
+        'goldRecords': goldRecords.map((item) => {
+          'date': item.date.toIso8601String(),
+          'pricePerGram': item.pricePerGram,
+          'grams': item.grams,
+          'amountInvested': item.amountInvested,
         }).toList(),
-
-        'deposits': deposits.map((item) {
-          return {
-            'type': item.type,
-            'bank': item.bank,
-            'accountNumber': item.accountNumber,
-            'principal': item.principal,
-            'monthlyDeposit': item.monthlyDeposit,
-            'interestRate': item.interestRate,
-            'startDate': item.startDate,
-            'maturityDate': item.maturityDate,
-            'maturityAmount': item.maturityAmount,
-          };
+        'deposits': deposits.map((item) => {
+          'type': item.type,
+          'bank': item.bank,
+          'accountNumber': item.accountNumber,
+          'principal': item.principal,
+          'monthlyDeposit': item.monthlyDeposit,
+          'interestRate': item.interestRate,
+          'startDate': item.startDate,
+          'maturityDate': item.maturityDate,
+          'maturityAmount': item.maturityAmount,
         }).toList(),
-
-        'insurancePolicies': insurancePolicies.map((item) {
-          return {
-            'company': item.company,
-            'policyNumber': item.policyNumber,
-            'policyType': item.policyType,
-            'premium': item.premium,
-            'frequency': item.frequency,
-            'startDate': item.startDate,
-            'maturityDate': item.maturityDate,
-            'sumAssured': item.sumAssured,
-          };
+        'insurancePolicies': insurancePolicies.map((item) => {
+          'company': item.company,
+          'policyNumber': item.policyNumber,
+          'policyType': item.policyType,
+          'premium': item.premium,
+          'frequency': item.frequency,
+          'startDate': item.startDate,
+          'maturityDate': item.maturityDate,
+          'sumAssured': item.sumAssured,
         }).toList(),
-
-        'futureGoalNotes': futureGoalNotes.map((item) {
-          return {
-            'title': item.title,
-            'note': item.note,
-            'createdAt': item.createdAt.toIso8601String(),
-          };
+        'futureGoalNotes': futureGoalNotes.map((item) => {
+          'title': item.title,
+          'note': item.note,
+          'createdAt': item.createdAt.toIso8601String(),
         }).toList(),
       };
 
-      final url = '$portfolioBaseUrl/$userId';
-
-      debugPrint('========== FINSIGHT SAVE ==========');
-      debugPrint('User ID: $userId');
-      debugPrint('PUT URL: $url');
-      debugPrint('Investments: ${investments.length}');
-      debugPrint('Gold: ${goldRecords.length}');
-      debugPrint('Deposits: ${deposits.length}');
-      debugPrint('Insurance: ${insurancePolicies.length}');
-      debugPrint('Future notes: ${futureGoalNotes.length}');
-
-      final response = await http
-          .put(
-            Uri.parse(url),
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      debugPrint('SAVE STATUS: ${response.statusCode}');
-      debugPrint('SAVE RESPONSE: ${response.body}');
-
-      if (!mounted) return;
+      final response = await http.put(
+        Uri.parse('$portfolioBaseUrl/${widget.userId}'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
 
       if (response.statusCode == 200) {
         showMessage('Portfolio saved permanently!');
       } else {
-        String serverMessage = 'Failed to save portfolio.';
-
+        Map<String, dynamic> data = {};
         try {
-          final decoded = jsonDecode(response.body);
-
-          if (decoded is Map<String, dynamic>) {
-            serverMessage =
-                decoded['message']?.toString() ??
-                decoded['error']?.toString() ??
-                serverMessage;
-          }
-        } catch (_) {
-          if (response.body.trim().isNotEmpty) {
-            serverMessage = response.body;
-          }
-        }
+          data = jsonDecode(response.body) as Map<String, dynamic>;
+        } catch (_) {}
 
         showMessage(
-          'Save failed (${response.statusCode}): $serverMessage',
+          data['message']?.toString() ?? 'Failed to save portfolio.',
           isError: true,
         );
       }
-    } on http.ClientException catch (error) {
-      debugPrint('HTTP SAVE ERROR: $error');
-
-      if (!mounted) return;
-
-      showMessage(
-        'Cannot connect to FinSight backend. Make sure Node.js server is running on port 5000.',
-        isError: true,
-      );
-    } on FormatException catch (error) {
-      debugPrint('JSON SAVE ERROR: $error');
-
-      if (!mounted) return;
-
-      showMessage(
-        'Invalid response received from the backend.',
-        isError: true,
-      );
-    } catch (error, stackTrace) {
-      debugPrint('SAVE PORTFOLIO ERROR: $error');
-      debugPrint('$stackTrace');
-
-      if (!mounted) return;
-
+    } catch (error) {
       showMessage(
         'Could not save portfolio: $error',
         isError: true,
       );
     } finally {
-      if (mounted) {
-        setState(() => isPortfolioSaving = false);
-      }
+      if (mounted) setState(() => isPortfolioSaving = false);
     }
   }
 
   // ---------------- TOTALS ----------------
 
   double get totalInvestment {
-    return investments.fold(
-      0.0,
-      (sum, item) => sum + item.amount,
-    );
+    // Financial Goal target amounts are goals, not existing investments.
+    return investments
+        .where((item) => !item.isFinancialGoal)
+        .fold(0.0, (sum, item) => sum + item.amount);
   }
 
   double get totalGoldValue {
@@ -1484,6 +1487,9 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
       }
     });
 
+    // Save immediately so the future goal/note survives refresh.
+    await savePortfolio();
+
     showMessage(
       existing == null
           ? 'Future goal note added!'
@@ -1491,8 +1497,9 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
     );
   }
 
-  void deleteFutureGoalNote(FutureGoalNote note) {
+  Future<void> deleteFutureGoalNote(FutureGoalNote note) async {
     setState(() => futureGoalNotes.remove(note));
+    await savePortfolio();
     showMessage('Future goal note deleted.');
   }
 
@@ -1524,7 +1531,13 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
   // LOGOUT
   // ============================================================
 
-  void logout() {
+  Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('logged_in_user_id');
+    await prefs.remove('logged_in_user_name');
+
+    if (!mounted) return;
+
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(
@@ -2207,13 +2220,88 @@ class _FinSightDashboardState extends State<FinSightDashboard> {
     FinancialData item,
     IconData icon,
   ) {
+    if (item.isFinancialGoal) {
+      final progressPercent = item.goalProgress * 100;
+
+      return Card(
+        margin: const EdgeInsets.only(bottom: 10),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(child: Icon(icon)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete',
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: Colors.red,
+                    ),
+                    onPressed: () => deleteInvestment(item),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Target Amount: ₹${item.amount.toStringAsFixed(2)}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Current Savings: ₹${item.currentSavings.toStringAsFixed(2)}',
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Monthly Contribution: ₹${item.monthlyContribution.toStringAsFixed(2)}',
+              ),
+              const SizedBox(height: 4),
+              Text(
+                item.targetDate.trim().isEmpty
+                    ? 'Target Date: Not set'
+                    : 'Target Date: ${item.targetDate}',
+              ),
+              const SizedBox(height: 10),
+              LinearProgressIndicator(value: item.goalProgress),
+              const SizedBox(height: 5),
+              Text(
+                'Progress: ${progressPercent.toStringAsFixed(1)}%',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              if (item.notes.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Notes: ${item.notes}',
+                  style: const TextStyle(color: Colors.grey),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
     return Card(
       child: ListTile(
         leading: CircleAvatar(child: Icon(icon)),
         title: Text(item.name),
         subtitle: Text(
-          '${item.portfolioCategory} • ${item.type}',
+          item.notes.trim().isEmpty
+              ? '${item.portfolioCategory} • ${item.type}'
+              : '${item.portfolioCategory} • ${item.type}\n${item.notes}',
         ),
+        isThreeLine: item.notes.trim().isNotEmpty,
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2424,26 +2512,108 @@ class _AddFinancialDataDialogState
       TextEditingController();
   final TextEditingController amountController =
       TextEditingController();
+  final TextEditingController currentSavingsController =
+      TextEditingController();
+  final TextEditingController monthlyContributionController =
+      TextEditingController();
+  final TextEditingController targetDateController =
+      TextEditingController();
+  final TextEditingController notesController =
+      TextEditingController();
+
+  DateTime? selectedTargetDate;
+
+  bool get isFinancialGoal => selectedType == 'Financial Goal';
+
+  double _parseMoney(String value) {
+    return double.tryParse(
+          value.replaceAll('₹', '').replaceAll(',', '').trim(),
+        ) ??
+        0.0;
+  }
+
+  Future<void> pickTargetDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: selectedTargetDate ?? DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2100),
+    );
+
+    if (picked == null) return;
+
+    setState(() {
+      selectedTargetDate = picked;
+      targetDateController.text =
+          '${picked.day.toString().padLeft(2, '0')}/'
+          '${picked.month.toString().padLeft(2, '0')}/'
+          '${picked.year}';
+    });
+  }
 
   void saveInvestment() {
-    if (nameController.text.trim().isEmpty ||
-        amountController.text.trim().isEmpty) {
+    final name = nameController.text.trim();
+
+    if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill all fields.'),
+        const SnackBar(content: Text('Please enter a name.')),
+      );
+      return;
+    }
+
+    if (isFinancialGoal) {
+      final targetAmount = _parseMoney(amountController.text);
+      final currentSavings =
+          _parseMoney(currentSavingsController.text);
+      final monthlyContribution =
+          _parseMoney(monthlyContributionController.text);
+
+      if (targetAmount <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter a valid target amount.'),
+          ),
+        );
+        return;
+      }
+
+      if (currentSavings < 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Current savings cannot be negative.'),
+          ),
+        );
+        return;
+      }
+
+      if (monthlyContribution < 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Monthly contribution cannot be negative.'),
+          ),
+        );
+        return;
+      }
+
+      Navigator.pop(
+        context,
+        FinancialData(
+          portfolioCategory: selectedPortfolio,
+          type: selectedType,
+          name: name,
+          amount: targetAmount,
+          currentSavings: currentSavings,
+          targetDate: targetDateController.text.trim(),
+          monthlyContribution: monthlyContribution,
+          notes: notesController.text.trim(),
         ),
       );
       return;
     }
 
-    final amount = double.tryParse(
-      amountController.text
-          .replaceAll('₹', '')
-          .replaceAll(',', '')
-          .trim(),
-    );
+    final amount = _parseMoney(amountController.text);
 
-    if (amount == null || amount <= 0) {
+    if (amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a valid amount.'),
@@ -2457,8 +2627,9 @@ class _AddFinancialDataDialogState
       FinancialData(
         portfolioCategory: selectedPortfolio,
         type: selectedType,
-        name: nameController.text.trim(),
+        name: name,
         amount: amount,
+        notes: notesController.text.trim(),
       ),
     );
   }
@@ -2467,112 +2638,195 @@ class _AddFinancialDataDialogState
   void dispose() {
     nameController.dispose();
     amountController.dispose();
+    currentSavingsController.dispose();
+    monthlyContributionController.dispose();
+    targetDateController.dispose();
+    notesController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add Financial Data'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: selectedType,
-              decoration: const InputDecoration(
-                labelText: 'Financial Data Type',
-                border: OutlineInputBorder(),
+      title: Text(
+        isFinancialGoal
+            ? 'Add Financial Goal'
+            : 'Add Financial Data',
+      ),
+      content: SizedBox(
+        width: 550,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: selectedType,
+                decoration: const InputDecoration(
+                  labelText: 'Financial Data Type',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'Mutual Fund',
+                    child: Text('Mutual Fund'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'PF',
+                    child: Text('PF / Provident Fund'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'SIP',
+                    child: Text('SIP'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'Financial Goal',
+                    child: Text('Financial Goal'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'Other',
+                    child: Text('Other Investment'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => selectedType = value);
+                  }
+                },
               ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'Mutual Fund',
-                  child: Text('Mutual Fund'),
+              const SizedBox(height: 15),
+              DropdownButtonFormField<String>(
+                initialValue: selectedPortfolio,
+                decoration: const InputDecoration(
+                  labelText: 'Portfolio Category',
+                  border: OutlineInputBorder(),
                 ),
-                DropdownMenuItem(
-                  value: 'PF',
-                  child: Text('PF / Provident Fund'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'TPR',
+                    child: Text('TPR'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'PPR',
+                    child: Text('PPR'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'PR',
+                    child: Text('PR'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'TPRW',
+                    child: Text('TPRW'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'General',
+                    child: Text('General'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => selectedPortfolio = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText:
+                      isFinancialGoal ? 'Goal Name' : 'Name',
+                  hintText: isFinancialGoal
+                      ? 'Example: Buy a Car'
+                      : null,
+                  prefixIcon: Icon(
+                    isFinancialGoal
+                        ? Icons.flag_outlined
+                        : Icons.account_balance,
+                  ),
+                  border: const OutlineInputBorder(),
                 ),
-                DropdownMenuItem(
-                  value: 'SIP',
-                  child: Text('SIP'),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: amountController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(
+                  decimal: true,
                 ),
-                DropdownMenuItem(
-                  value: 'Financial Goal',
-                  child: Text('Financial Goal'),
+                decoration: InputDecoration(
+                  labelText: isFinancialGoal
+                      ? 'Target Amount'
+                      : 'Amount',
+                  hintText: isFinancialGoal
+                      ? 'Example: 1000000'
+                      : null,
+                  prefixIcon:
+                      const Icon(Icons.currency_rupee),
+                  border: const OutlineInputBorder(),
                 ),
-                DropdownMenuItem(
-                  value: 'Other',
-                  child: Text('Other Investment'),
+              ),
+
+              if (isFinancialGoal) ...[
+                const SizedBox(height: 15),
+                TextField(
+                  controller: currentSavingsController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Current Savings',
+                    hintText: 'Example: 250000',
+                    prefixIcon: Icon(Icons.savings_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                TextField(
+                  controller: monthlyContributionController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Monthly Contribution',
+                    hintText: 'Example: 25000',
+                    prefixIcon: Icon(Icons.calendar_month),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                TextField(
+                  controller: targetDateController,
+                  readOnly: true,
+                  onTap: pickTargetDate,
+                  decoration: const InputDecoration(
+                    labelText: 'Target Date',
+                    hintText: 'Select target date',
+                    prefixIcon: Icon(Icons.event),
+                    suffixIcon: Icon(Icons.calendar_today),
+                    border: OutlineInputBorder(),
+                  ),
                 ),
               ],
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() => selectedType = value);
-                }
-              },
-            ),
-            const SizedBox(height: 15),
-            DropdownButtonFormField<String>(
-              initialValue: selectedPortfolio,
-              decoration: const InputDecoration(
-                labelText: 'Portfolio Category',
-                border: OutlineInputBorder(),
+
+              const SizedBox(height: 15),
+              TextField(
+                controller: notesController,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  labelText: isFinancialGoal
+                      ? 'Notes (Optional)'
+                      : 'Notes',
+                  hintText: isFinancialGoal
+                      ? 'Example: Need to increase savings after graduation.'
+                      : 'Enter any additional details',
+                  prefixIcon: const Icon(Icons.notes),
+                  border: const OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
               ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'TPR',
-                  child: Text('TPR'),
-                ),
-                DropdownMenuItem(
-                  value: 'PPR',
-                  child: Text('PPR'),
-                ),
-                DropdownMenuItem(
-                  value: 'PR',
-                  child: Text('PR'),
-                ),
-                DropdownMenuItem(
-                  value: 'TPRW',
-                  child: Text('TPRW'),
-                ),
-                DropdownMenuItem(
-                  value: 'General',
-                  child: Text('General'),
-                ),
-              ],
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() => selectedPortfolio = value);
-                }
-              },
-            ),
-            const SizedBox(height: 15),
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Name',
-                prefixIcon: Icon(Icons.account_balance),
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 15),
-            TextField(
-              controller: amountController,
-              keyboardType:
-                  const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: InputDecoration(
-                labelText: selectedType == 'Financial Goal'
-                    ? 'Target Amount'
-                    : 'Amount',
-                prefixIcon:
-                    const Icon(Icons.currency_rupee),
-                border: const OutlineInputBorder(),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       actions: [
